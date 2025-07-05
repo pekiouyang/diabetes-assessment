@@ -1,0 +1,113 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression, LassoCV
+from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
+from sklearn.metrics import accuracy_score, recall_score, f1_score, roc_auc_score
+import shap
+import matplotlib.pyplot as plt
+
+# 1. 加载数据
+url = 'diabetes.csv'
+df = pd.read_csv(url)
+df.columns = [
+    "Pregnancies", "Glucose", "BloodPressure", "SkinThickness",
+    "Insulin", "BMI", "DiabetesPedigreeFunction", "Age", "Outcome"
+]
+
+# 2. 数据预处理：替换无效0值为中位数
+cols_with_zero = ["Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI"]
+for col in cols_with_zero:
+    df[col] = df[col].replace(0, np.nan)
+    df[col] = df[col].fillna(df[col].median())
+
+# 3. 特征与标签分离
+X = df.drop("Outcome", axis=1)
+y = df["Outcome"]
+
+# 4. 标准化处理
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+X_scaled = pd.DataFrame(X_scaled, columns=X.columns)  # 保留列名
+
+# 5. 特征选择（皮尔逊+Lasso+随机森林）
+# 5.1 皮尔逊相关系数筛选（保留相关系数绝对值>0.1）
+pearson_corr = X_scaled.corrwith(y).abs()
+pearson_features = pearson_corr[pearson_corr > 0.1].index.tolist()
+
+# 5.2 Lasso回归筛选（保留非零系数特征）
+lasso = LassoCV(cv=5, max_iter=10000).fit(X_scaled, y)
+lasso_features = X_scaled.columns[lasso.coef_ != 0].tolist()
+
+# 5.3 随机森林特征重要性筛选（保留重要性>0.05）
+rf = RandomForestClassifier(n_estimators=100, random_state=42)
+rf.fit(X_scaled, y)
+rf_importance = pd.Series(rf.feature_importances_, index=X_scaled.columns)
+rf_features = rf_importance[rf_importance > 0.05].index.tolist()
+
+# 5.4 取三种方法的特征交集（至少保留3个特征）
+selected_features = list(set(pearson_features) & set(lasso_features) & set(rf_features))
+if len(selected_features) < 3:
+    selected_features = list(set(pearson_features) | set(lasso_features) | set(rf_features))
+
+X_selected = X_scaled[selected_features]
+
+# 6. 划分数据集（分层抽样）
+X_train, X_test, y_train, y_test = train_test_split(
+    X_selected, y, test_size=0.2, random_state=42, stratify=y
+)
+
+# 7. XGBoost参数调优
+param_grid = {
+    'max_depth': [3, 4],
+    'learning_rate': [0.05, 0.1],
+    'subsample': [0.8, 1.0],
+    'gamma': [0.1, 0.2]
+}
+
+xgb = XGBClassifier(
+    n_estimators=200,
+    random_state=42,
+    scale_pos_weight=len(y_train[y_train == 0]) / len(y_train[y_train == 1])
+)
+grid_search = GridSearchCV(xgb, param_grid, cv=5, scoring='roc_auc')
+grid_search.fit(X_train, y_train)
+best_xgb = grid_search.best_estimator_
+
+# 8. 模型训练与评估
+models = {
+    "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
+    "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42),
+    "XGBoost (Tuned)": best_xgb
+}
+
+results = []
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    y_proba = model.predict_proba(X_test)[:, 1]
+
+    metrics = {
+        "Model": name,
+        "Accuracy": round(accuracy_score(y_test, y_pred), 2),
+        "Recall": round(recall_score(y_test, y_pred), 2),
+        "F1": round(f1_score(y_test, y_pred), 2),
+        "AUC": round(roc_auc_score(y_test, y_proba), 3)  # 保留3位小数
+    }
+    results.append(metrics)
+
+# 9. 打印结果
+print("\n模型性能对比:")
+print("| Model               | Accuracy | Recall | F1  | AUC    |")
+print("|---------------------|----------|--------|-----|--------|")
+for res in results:
+    print(f"| {res['Model']:<19} | {res['Accuracy']:>8} | {res['Recall']:>6} | {res['F1']:>4} | {res['AUC']:>6} |")
+
+# 10. SHAP可解释性分析
+explainer = shap.Explainer(best_xgb, X_train)
+shap_values = explainer(X_test)
+shap.plots.beeswarm(shap_values)
+plt.title("XGBoost的SHAP特征重要性分析")
+plt.show()
