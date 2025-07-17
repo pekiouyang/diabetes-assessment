@@ -10,52 +10,58 @@ import shap
 import matplotlib.pyplot as plt
 
 # 1. Load data
-url = 'diabetes.csv'
-df = pd.read_csv(url)
+url = 'diabetes.csv' # The path of the data csv
+df = pd.read_csv(url) # Get the contents of the csv file
+
+# The column headers for the data
 df.columns = [
     "Pregnancies", "Glucose", "BloodPressure", "SkinThickness",
     "Insulin", "BMI", "DiabetesPedigreeFunction", "Age", "Outcome"
 ]
 
 # 2. Data Preprocessing: Replace invalid zero values with the median.
-cols_with_zero = ["Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI"]
-for col in cols_with_zero:
-    df[col] = df[col].replace(0, np.nan)
-    df[col] = df[col].fillna(df[col].median())
 
-# 3. Separate features from labels
+# The list of columns with known 0 values (bad data)
+cols_with_zero = ["Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI"]
+
+# Loop through the columns and fix the bad data
+for col in cols_with_zero:
+    df[col] = df[col].replace(0, np.nan) # Replace 0 value with NaN (Not A Number)
+    df[col] = df[col].fillna(df[col].median()) # Replace NaN values with the median value
+
+# 3. Split the "Outcome" and Other values into separate data sets
 X = df.drop("Outcome", axis=1)
 y = df["Outcome"]
 
-# 4. Standardize the data
+# 4. Use the StandardScalar library to standardize the data
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
-X_scaled = pd.DataFrame(X_scaled, columns=X.columns)  #
+X_scaled = pd.DataFrame(X_scaled, columns=X.columns)
 
 # 5. Feature Selection (Pearson + Lasso + Random Forest)
-# 5.1 Pearson correlation coefficient filtering (retain features with absolute correlation coefficient > 0.1)
+
+# 5.1 Pearson correlation
 pearson_corr = X_scaled.corrwith(y).abs()
 pearson_features = pearson_corr[pearson_corr > 0.1].index.tolist()
 
-# 5.2 Lasso regression filtering (retain features with non-zero coefficients)
-
+# 5.2 Lasso regression filtering
 lasso = LassoCV(cv=5, max_iter=10000).fit(X_scaled, y)
 lasso_features = X_scaled.columns[lasso.coef_ != 0].tolist()
 
-# 5.3 Random Forest feature importance filtering (retain features with importance > 0.05)
+# 5.3 Random Forest feature importance filtering
 rf = RandomForestClassifier(n_estimators=100, random_state=42)
 rf.fit(X_scaled, y)
 rf_importance = pd.Series(rf.feature_importances_, index=X_scaled.columns)
 rf_features = rf_importance[rf_importance > 0.05].index.tolist()
 
-# 5.4 Take the intersection of features from the three methods (retain at least 3 features)
+# 5.4 Take the intersection of features from the three methods
 selected_features = list(set(pearson_features) & set(lasso_features) & set(rf_features))
 if len(selected_features) < 3:
     selected_features = list(set(pearson_features) | set(lasso_features) | set(rf_features))
 
 X_selected = X_scaled[selected_features]
 
-# 6. Split the dataset (stratified sampling)
+# 6. Split the dataset
 X_train, X_test, y_train, y_test = train_test_split(
     X_selected, y, test_size=0.2, random_state=42, stratify=y
 )
@@ -78,7 +84,6 @@ grid_search.fit(X_train, y_train)
 best_xgb = grid_search.best_estimator_
 
 # 8. train and evaluate the model
-
 models = {
     "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
     "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42),
@@ -111,5 +116,3 @@ for res in results:
 explainer = shap.Explainer(best_xgb, X_train)
 shap_values = explainer(X_test)
 shap.plots.beeswarm(shap_values)
-plt.title("XGBoost的SHAP Characteristic Importance Analysis ")
-plt.show()
