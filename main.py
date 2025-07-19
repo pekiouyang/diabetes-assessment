@@ -7,19 +7,18 @@ from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from sklearn.metrics import accuracy_score, recall_score, f1_score, roc_auc_score
 import shap
-import matplotlib.pyplot as plt
 
 # 1. Load data
 url = 'diabetes.csv' # The path of the data csv
 df = pd.read_csv(url) # Get the contents of the csv file
 
-# The column headers for the data
+# The column head ers for the data
 df.columns = [
     "Pregnancies", "Glucose", "BloodPressure", "SkinThickness",
     "Insulin", "BMI", "DiabetesPedigreeFunction", "Age", "Outcome"
 ]
 
-# 2. Data Preprocessing: Replace invalid zero values with the median.
+# 2. Data cleaning: Replace invalid zero values with the median.
 
 # The list of columns with known 0 values (bad data)
 cols_with_zero = ["Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI"]
